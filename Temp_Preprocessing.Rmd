@@ -1,0 +1,118 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+```{r setup, include=FALSE}
+library(flowCore)
+library(flowDensity)
+library(tidyverse)
+library(stringr)
+
+
+knitr::opts_chunk$set(echo=FALSE, message = F, warning = F)
+#source("Functions/distances.R")
+source("../../cyanoFilter/R/good_measurement.R")
+source("../../cyanoFilter/R/retain.R")
+source("../../cyanoFilter/R/lnTrans.R")
+source("../../cyanoFilter/R/nona.R")
+source("../../cyanoFilter/R/noneg.R")
+source("../../cyanoFilter/R/plotting_functions.R")
+#source("../../cyanoFilter/R/cell_debris.R")
+#source("../../cyanoFilter/R/cell_debris_nc.R")
+source("../../cyanoFilter/R/debris_nc.R")
+source("../../cyanoFilter/R/debris_c.R")
+source("../../cyanoFilter/R/bs4_nc.R")
+source("../../cyanoFilter/R/bs4_c.R")
+source("../../cyanoFilter/R/debris_invasion_nc.R")
+source("../../cyanoFilter/R/bs4_invasion_c.R")
+source("../../cyanoFilter/R/bs5_c.R")
+source("../../cyanoFilter/R/bs5_nc.R")
+source("../../cyanoFilter/R/bs5_invasion_c.R")
+source("../../cyanoFilter/R/bs5_invasion_nc.R")
+source("../../cyanoFilter/R/Margin_Cells.R")
+```
+
+
+## Reading in The Flow Cytometer Files
+
+The flow cytometer files are stored the **Cytometer Data** directory one level above the current directory, hence we go back one level and read the files from this folder. However, we have to analyse the metadata files first to determine the files that are good. This enables us to only read files that matter which will save considerable computing time and effort. 
+
+### What Measurements are Good?
+
+To determine if a measurement from the flow cytometer is good, the cells per microlitre $(cells/\mu L)$ should be between $50$ and $1000$. The dilution factor that will result $cells/\mu L$ within this range is normally not known in advance, hence the flow cytometry experiment is performed at different diltuion factors ($2 - 3$ dilution factors). Furthermore, the flow cytometer is configured to count at least $5000$ gated events, it is also desired to ignore files that doesn't meet this threshold. Technically if the $cells/\mu L$ is below $50$, the number of gated events will be lesser than $5000$ but the same cannot be said of files with $cells/\mu L$ above $1000$.
+The above discussed concepts are already implemented in the *goodfcs()* function from the **cyanoFilter** package. Hence, we use this to determine which of the dilution levels are good. T
+
+```{r readfiles}
+#list all folders in the Cytometer Data folder
+metafiles <- list.dirs("../Cytometer Data")
+
+#reading in all meta data file and determining their status
+meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
+  inside <- list.files(x, full.names = T)
+  csv.ext <- which(tools::file_ext(inside) == "csv" & 
+                    !str_detect(inside, "GroupStats"))
+  csv.toberead <- inside[csv.ext]
+  if(length(csv.ext) == 1) {
+    
+   metadata <- read.csv(csv.toberead, skip = 7,
+                         stringsAsFactors = F, 
+                         check.names = T)
+   names(metadata)[which(str_detect(names(metadata), "Cells."))] <- "CellspML"
+   first_names <- sapply(str_split(metadata$Sample.ID, "_"), "[[", 1)
+   metadata$Strain <- str_extract(first_names, "[4-5]")
+   metadata$Status <- goodfcs(metadata, mxd_cellpML = 1000, mnd_cellpML = 50)
+   id_names <- lapply(str_split(metadata$Sample.ID, "_"), function(x) {
+        nms <- ifelse(length(x) < 3, paste(x[1], x[2], sep = "_"), 
+               paste(x[1], x[2], x[3], sep = "_"))
+    })
+    metadata$Sample.ID2 <- unlist(id_names)
+    
+  } else if (length(csv.ext) > 1) {
+    
+    metadatas <- lapply(csv.toberead, read.csv, skip = 7,
+                         stringsAsFactors = F, 
+                         check.names = T)
+    metadata <- do.call(rbind.data.frame, metadatas)
+    names(metadata)[which(str_detect(names(metadata), "Cells."))] <- "CellspML"
+    first_names <- sapply(str_split(metadata$Sample.ID, "_"), "[[", 1)
+    metadata$Strain <- str_extract(first_names, "[4-5]")
+    metadata$Status <- goodfcs(metadata, mxd_cellpML = 1000, mnd_cellpML = 50)
+    id_names <- lapply(str_split(metadata$Sample.ID, "_"), function(x) {
+    nms <- ifelse(length(x) < 3, paste(x[1], x[2], sep = "_"), 
+           paste(x[1], x[2], x[3], sep = "_"))
+    })
+    metadata$Sample.ID2 <- unlist(id_names)
+    
+  }
+  return(metadata)
+})
+```
+
+The block of code above goes into all sub-directory in the **Cytometer Data**, read all *csv* files that are not associated with *GroupStats* (note that the csv files associated with the *instrument settings* and *GroupStats* are saved in each directory with an **_GroupStats** for the *GroupStats* csv files), clean untidy variable names and determine their status (*good* or *bad*). The status is added as an extra column to the *csv* files.
+
+### Files Retained
+
+Since all samples were examined at different dilution levels, it implies that there is the possibility of having a sample being good at different dilution levels, therefore there is need for a choice to be made. We will discuss two strategies for making a choice of files to retain based on $cells/\mu L$. The first choice is going for the dilution factor with the lowest $cells/\mu L$ because this will ensure you have maximal number of events. This will be a good strategy for experiments with small number of particles. On the other hand, one could also decide to go for the dilution factor with the highest $cells/\mu L$.
+
+
+```{r toretain}
+ lapply(meta_files_data, function(y) {
+  
+  broken <- y %>% dplyr::group_by(Sample.ID2) %>% tidyr::nest()
+  purrr::map(broken$data, function() {
+    
+  })
+  
+})
+
+```
+
+
+
+### Finally The Flow Cytometer Files
+
+```{r readFcs}
+
+```
+
