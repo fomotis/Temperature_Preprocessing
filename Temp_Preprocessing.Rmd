@@ -40,8 +40,7 @@ The flow cytometer files are stored the **Cytometer Data** directory one level a
 
 ### What Measurements are Good?
 
-To determine if a measurement from the flow cytometer is good, the cells per microlitre $(cells/\mu L)$ should be between $50$ and $1000$. The dilution factor that will result $cells/\mu L$ within this range is normally not known in advance, hence the flow cytometry experiment is performed at different diltuion factors ($2 - 3$ dilution factors). Furthermore, the flow cytometer is configured to count at least $5000$ gated events, it is also desired to ignore files that doesn't meet this threshold. Technically if the $cells/\mu L$ is below $50$, the number of gated events will be lesser than $5000$ but the same cannot be said of files with $cells/\mu L$ above $1000$.
-The above discussed concepts are already implemented in the *goodfcs()* function from the **cyanoFilter** package. Hence, we use this to determine which of the dilution levels are good. T
+To determine if a measurement from the flow cytometer is good, the cells per microlitre $(cells/\mu L)$ should be between $50$ and $1000$. The dilution factor that will result $cells/\mu L$ within this range is normally not known in advance, hence the flow cytometry experiment is performed at different diltuion factors ($2 - 3$ dilution factors). Furthermore, the flow cytometer is configured to count at least $5000$ gated events, it is also desired to ignore files that doesn't meet this threshold. Technically if the $cells/\mu L$ is below $50$, the number of gated events will be lesser than $5000$ but the same cannot be said of files with $cells/\mu L$ above $1000$. The above discussed concepts are already implemented in the *goodfcs()* function from the **cyanoFilter** package. Hence, we use this to determine which of the dilution levels are good. T
 
 ```{r readfiles}
 #list all folders in the Cytometer Data folder
@@ -60,19 +59,22 @@ meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
                          check.names = T)
    names(metadata)[which(str_detect(names(metadata), "Cells."))] <- "CellspML"
    first_names <- sapply(str_split(metadata$Sample.ID, "_"), "[[", 1)
-   metadata$Strain <- str_extract(first_names, "[4-5]")
+   metadata$Strain <- first_names#str_extract(first_names, "[4-5]")
    metadata$Status <- goodfcs(metadata, mxd_cellpML = 1000, mnd_cellpML = 50)
    id_names <- lapply(str_split(metadata$Sample.ID, "_"), function(x) {
         nms <- ifelse(length(x) < 3, paste(x[1], x[2], sep = "_"), 
                paste(x[1], x[2], x[3], sep = "_"))
     })
     metadata$Sample.ID2 <- unlist(id_names)
+    metadata$File <- 1
     
   } else if (length(csv.ext) > 1) {
     
-    metadatas <- lapply(csv.toberead, read.csv, skip = 7,
-                         stringsAsFactors = F, 
-                         check.names = T)
+    metadatas <- lapply(1:length(csv.toberead), function(x) {
+      ddata <- read.csv(csv.toberead[x], skip = 7, stringsAsFactors = F, check.names = T)
+      ddata$File <- x
+      return(ddata)
+    })
     metadata <- do.call(rbind.data.frame, metadatas)
     names(metadata)[which(str_detect(names(metadata), "Cells."))] <- "CellspML"
     first_names <- sapply(str_split(metadata$Sample.ID, "_"), "[[", 1)
@@ -89,7 +91,7 @@ meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
 })
 ```
 
-The block of code above goes into all sub-directory in the **Cytometer Data**, read all *csv* files that are not associated with *GroupStats* (note that the csv files associated with the *instrument settings* and *GroupStats* are saved in each directory with an **_GroupStats** for the *GroupStats* csv files), clean untidy variable names and determine their status (*good* or *bad*). The status is added as an extra column to the *csv* files.
+The block of code above goes into all sub-directory in the **Cytometer Data**, read all *csv* files that are not associated with *GroupStats* (note that the csv files associated with the *instrument settings* and *GroupStats* are saved in each directory with an **_GroupStats** for the *GroupStats* csv files), clean untidy variable names and determine their *statu*s (*good* or *bad*). The *status* and *file number* are added as an extra column to the *csv* files. A *file number* $1$ implies the data associated to that sample is contained in the first *fcs* file while $2$ implies it is in the second.
 
 ### Files Retained
 
@@ -97,13 +99,15 @@ Since all samples were examined at different dilution levels, it implies that th
 
 
 ```{r toretain}
- lapply(meta_files_data, function(y) {
+meta_files_retain <- lapply(meta_files_data, function(y) {
   
   broken <- y %>% dplyr::group_by(Sample.ID2) %>% tidyr::nest()
-  purrr::map(broken$data, function() {
-    
-  })
-  
+  brokenR <- broken %>% dplyr::mutate(Retains = purrr::map(broken$data, function(.x) {
+      rt <- .x %>% dplyr::mutate(Retain = retain(.x, make_decision = "mini"))
+      #cbind(.x, Retain = rt)
+    })
+  ) 
+  return(tidyr::unnest(brokenR))
 })
 
 ```
@@ -115,4 +119,7 @@ Since all samples were examined at different dilution levels, it implies that th
 ```{r readFcs}
 
 ```
+
+
+
 
