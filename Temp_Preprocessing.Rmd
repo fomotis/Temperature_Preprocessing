@@ -1,16 +1,18 @@
 ---
-title: "R Notebook"
-output: html_notebook
+title: "A Simple Guide on Pre-Processing Flow Cytometer Data Files"
+output:
+  html_document:
+    df_print: paged
 ---
 
 ```{r setup, include=FALSE}
 library(flowCore)
-library(flowDensity)
+#library(flowDensity)
 library(tidyverse)
 library(stringr)
 
 
-knitr::opts_chunk$set(echo=FALSE, message = F, warning = F)
+knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
 #source("Functions/distances.R")
 source("../../cyanoFilter/R/good_measurement.R")
 source("../../cyanoFilter/R/retain.R")
@@ -36,11 +38,11 @@ source("../../cyanoFilter/R/Margin_Cells.R")
 
 ## Reading in The Flow Cytometer Files
 
-The flow cytometer files are stored the **Cytometer Data** directory one level above the current directory, hence we go back one level and read the files from this folder. However, we have to analyse the metadata files first to determine the files that are good. This enables us to only read files that matter which will save considerable computing time and effort. 
+The flow cytometer files are stored the **Cytometer Data** directory one level above the current directory, hence we go back one level and read the files from this folder. However, we have to analyse the metadata files first to determine the files that are good. This enables us to only read files that matter which will save considerable computing time and effort. It is important to note that this tutorial is written based on settings on the `guavava` flow cytometer armed with the `lynCyte` software. Also the settings on the cytometer is specially tuned for counting and sorting cyanobacteria cells. While the tutorial might not be directly applicable to other instruments and settings, the general idea is applicable and the ensuring codes could be easily adapted.
 
 ### What Measurements are Good?
 
-To determine if a measurement from the flow cytometer is good, the cells per microlitre $(cells/\mu L)$ should be between $50$ and $1000$. The dilution factor that will result $cells/\mu L$ within this range is normally not known in advance, hence the flow cytometry experiment is performed at different diltuion factors ($2 - 3$ dilution factors). Furthermore, the flow cytometer is configured to count at least $5000$ gated events, it is also desired to ignore files that doesn't meet this threshold. Technically if the $cells/\mu L$ is below $50$, the number of gated events will be lesser than $5000$ but the same cannot be said of files with $cells/\mu L$ above $1000$. The above discussed concepts are already implemented in the *goodfcs()* function from the **cyanoFilter** package. Hence, we use this to determine which of the dilution levels are good. T
+To determine if a measurement from the flow cytometer is good, the cells per microlitre $(cells/\mu L)$ should be between $50$ and $1000$. The dilution factor that will result $cells/\mu L$ within this range is normally not known in advance, hence the flow cytometry experiment is performed at different diltuion factors ($2 - 3$ dilution factors). Furthermore, the flow cytometer is configured to count at least $5000$ gated events, it is also desired to ignore files that doesn't meet this threshold. Technically if the $cells/\mu L$ is below $50$, the number of gated events will be lesser than $5000$ but the same cannot be said of files with $cells/\mu L$ above $1000$. The above discussed concepts are already implemented in the *goodfcs()* function from the **cyanoFilter** package. Hence, we use this to determine which of the dilution levels are good.
 
 ```{r readfiles}
 #list all folders in the Cytometer Data folder
@@ -49,14 +51,17 @@ metafiles <- list.dirs("../Cytometer Data")
 #reading in all meta data file and determining their status
 meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
   inside <- list.files(x, full.names = T)
+  #all csv files without the word GroupStats
   csv.ext <- which(tools::file_ext(inside) == "csv" & 
                     !str_detect(inside, "GroupStats"))
   csv.toberead <- inside[csv.ext]
+  
   if(length(csv.ext) == 1) {
     
    metadata <- read.csv(csv.toberead, skip = 7,
                          stringsAsFactors = F, 
                          check.names = T)
+   #clean up the Cells.muL column
    names(metadata)[which(str_detect(names(metadata), "Cells."))] <- "CellspML"
    first_names <- sapply(str_split(metadata$Sample.ID, "_"), "[[", 1)
    metadata$Strain <- first_names#str_extract(first_names, "[4-5]")
@@ -91,15 +96,19 @@ meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
 })
 ```
 
-The block of code above goes into all sub-directory in the **Cytometer Data**, read all *csv* files that are not associated with *GroupStats* (note that the csv files associated with the *instrument settings* and *GroupStats* are saved in each directory with an **_GroupStats** for the *GroupStats* csv files), clean untidy variable names and determine their *statu*s (*good* or *bad*). The *status* and *file number* are added as an extra column to the *csv* files. A *file number* $1$ implies the data associated to that sample is contained in the first *fcs* file while $2$ implies it is in the second.
+The block of code above goes into all sub-directory in the **Cytometer Data**, read all *csv* files that are not associated with *GroupStats* (note that the csv files associated with the *instrument settings* and *GroupStats* are saved in each directory with an **_GroupStats** for the *GroupStats* csv files), clean untidy variable names and determine their *statu*s (*good* or *bad*). The *Status* and `File (file number)` are added as an extra column to the *csv* files. A *file number* $1$ implies the data associated to that sample is contained in the first *fcs* file while $2$ implies it is in the second. Below is what a sample of the metafiles look like after the preprocessing above.
+
+```{r}
+head(meta_files_data[[1]])
+
+```
 
 ### Files Retained
 
 Since all samples were examined at different dilution levels, it implies that there is the possibility of having a sample being good at different dilution levels, therefore there is need for a choice to be made. We will discuss two strategies for making a choice of files to retain based on $cells/\mu L$. The first choice is going for the dilution factor with the lowest $cells/\mu L$ because this will ensure you have maximal number of events. This will be a good strategy for experiments with small number of particles. On the other hand, one could also decide to go for the dilution factor with the highest $cells/\mu L$.
 
-
 ```{r toretain}
-meta_files_retain <- lapply(meta_files_data, function(y) {
+meta_files_data <- lapply(meta_files_data, function(y) {
   
   broken <- y %>% dplyr::group_by(Sample.ID2) %>% tidyr::nest()
   brokenR <- broken %>% dplyr::mutate(Retains = purrr::map(broken$data, function(.x) {
@@ -112,12 +121,36 @@ meta_files_retain <- lapply(meta_files_data, function(y) {
 
 ```
 
+The code above groups the *csv* files by sample IDS then runs the *retain()* function on each group. This adds a `Retain` column to the original data table. This column gives a decision on the files to be retained. Below is an example of how the *csv* files look like after the pre-processing. 
+
+```{r}
+head(meta_files_data[[1]])
+```
 
 
 ### Finally The Flow Cytometer Files
 
-```{r readFcs}
+We are finally ready to read in the flow cytometer files. We use the same idea as with the csv files
 
+```{r readFcs, cache=FALSE}
+fcs_files_data <- map2(.x = metafiles[2:length(metafiles)], .y = meta_files_data, 
+      function(.x, .y) {
+          inside <- list.files(.x, full.names = T)
+          fcs.ext <- which(tools::file_ext(inside) == "fcs" )
+          fcs.toberead <- inside[fcs.ext]
+          Retained <- .y %>% dplyr::filter(Retain == "Retain")
+          fcs.files <- lapply(1:nrow(Retained), function(i) {
+                          fcs_data <- read.FCS(fcs.toberead[Retained$File1[i]], 
+                                          alter.names = TRUE, 
+                                          transformation = FALSE, 
+                                        emptyValue = FALSE, 
+                                        dataset = Retained$Sample.Number[i])
+    })
+    keys <- sapply(fcs.files, keyword, "GTI$SAMPLEID")
+    names(fcs.files) <- keys
+    as(fcs.files, "flowSet")
+  
+})
 ```
 
 
