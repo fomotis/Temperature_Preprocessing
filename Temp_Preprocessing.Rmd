@@ -38,7 +38,7 @@ source("../../cyanoFilter/R/Margin_Cells.R")
 
 ## Reading in The Flow Cytometer Files
 
-The flow cytometer files are stored the **Cytometer Data** directory one level above the current directory, hence we go back one level and read the files from this folder. However, we have to analyse the metadata files first to determine the files that are good. This enables us to only read files that matter which will save considerable computing time and effort. It is important to note that this tutorial is written based on settings on the `guavava` flow cytometer armed with the `lynCyte` software. Also the settings on the cytometer is specially tuned for counting and sorting cyanobacteria cells. While the tutorial might not be directly applicable to other instruments and settings, the general idea is applicable and the ensuring codes could be easily adapted.
+The flow cytometer files are stored the **Cytometer Data** directory one level above the current directory, hence we go back one level and read the files from this folder. However, we have to analyse the metadata files first to determine the files that are good. This enables us to only read files that matter which will save considerable computing time and effort.
 
 ### What Measurements are Good?
 
@@ -130,15 +130,18 @@ head(meta_files_data[[1]])
 
 ### Finally The Flow Cytometer Files
 
-We are finally ready to read in the flow cytometer files. We use the same idea as with the csv files
+We are finally ready to read in the flow cytometer files. We use the same idea as with the csv files. First, we filter out all rows that are to be retained in the associated csv files. Then we list all files with the **.fcs** externsion and read only the fcs files that are to be retained using both the File and Sample.Number columns. The File column allows us read the appropriate fcs file while the Sample.Number column allows us extract the precisely needed data from the fcs file.
 
-```{r readFcs, cache=FALSE}
+
+```{r readFcs, cache = TRUE}
 fcs_files_data <- map2(.x = metafiles[2:length(metafiles)], .y = meta_files_data, 
       function(.x, .y) {
+          Retained <- .y %>% dplyr::filter(Retain == "Retain")
+        
           inside <- list.files(.x, full.names = T)
           fcs.ext <- which(tools::file_ext(inside) == "fcs" )
           fcs.toberead <- inside[fcs.ext]
-          Retained <- .y %>% dplyr::filter(Retain == "Retain")
+          
           fcs.files <- lapply(1:nrow(Retained), function(i) {
                           fcs_data <- read.FCS(fcs.toberead[Retained$File1[i]], 
                                           alter.names = TRUE, 
