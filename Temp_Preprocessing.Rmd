@@ -44,9 +44,10 @@ The flow cytometer files are stored the **Cytometer Data** directory one level a
 
 To determine if a measurement from the flow cytometer is good, the cells per microlitre $(cells/\mu L)$ should be between $50$ and $1000$. The dilution factor that will result $cells/\mu L$ within this range is normally not known in advance, hence the flow cytometry experiment is performed at different diltuion factors ($2 - 3$ dilution factors). Furthermore, the flow cytometer is configured to count at least $5000$ gated events, it is also desired to ignore files that doesn't meet this threshold. Technically if the $cells/\mu L$ is below $50$, the number of gated events will be lesser than $5000$ but the same cannot be said of files with $cells/\mu L$ above $1000$. The above discussed concepts are already implemented in the *goodfcs()* function from the **cyanoFilter** package. Hence, we use this to determine which of the dilution levels are good.
 
-```{r readfiles}
+```{r readcsvfiles}
 #list all folders in the Cytometer Data folder
 metafiles <- list.dirs("../Cytometer Data")
+nms <- sapply(str_split(metafiles[2:length(metafiles)], "/"), "[[", 3)
 
 #reading in all meta data file and determining their status
 meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
@@ -61,10 +62,12 @@ meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
    metadata <- read.csv(csv.toberead, skip = 7,
                          stringsAsFactors = F, 
                          check.names = T)
+   metadata <- metadata[, 1:65]
    #clean up the Cells.muL column
    names(metadata)[which(str_detect(names(metadata), "Cells."))] <- "CellspML"
    first_names <- sapply(str_split(metadata$Sample.ID, "_"), "[[", 1)
-   metadata$Strain <- first_names#str_extract(first_names, "[4-5]")
+   metadata$Strain <- str_extract(first_names, "[4-5]")
+   metadata$Strain[is.na(metadata$Strain)] <- "BI"
    metadata$Status <- goodfcs(metadata, mxd_cellpML = 1000, mnd_cellpML = 50)
    id_names <- lapply(str_split(metadata$Sample.ID, "_"), function(x) {
         nms <- ifelse(length(x) < 3, paste(x[1], x[2], sep = "_"), 
@@ -75,15 +78,17 @@ meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
     
   } else if (length(csv.ext) > 1) {
     
-    metadatas <- lapply(1:length(csv.toberead), function(x) {
-      ddata <- read.csv(csv.toberead[x], skip = 7, stringsAsFactors = F, check.names = T)
-      ddata$File <- x
+    metadatas <- lapply(1:length(csv.toberead), function(i) {
+      ddata <- read.csv(csv.toberead[i], skip = 7, stringsAsFactors = F, check.names = T)
+      ddata <- ddata[, 1:65]
+      ddata$File <- i
       return(ddata)
     })
     metadata <- do.call(rbind.data.frame, metadatas)
     names(metadata)[which(str_detect(names(metadata), "Cells."))] <- "CellspML"
     first_names <- sapply(str_split(metadata$Sample.ID, "_"), "[[", 1)
     metadata$Strain <- str_extract(first_names, "[4-5]")
+    metadata$Strain[is.na(metadata$Strain)] <- "BI"
     metadata$Status <- goodfcs(metadata, mxd_cellpML = 1000, mnd_cellpML = 50)
     id_names <- lapply(str_split(metadata$Sample.ID, "_"), function(x) {
     nms <- ifelse(length(x) < 3, paste(x[1], x[2], sep = "_"), 
@@ -94,12 +99,14 @@ meta_files_data <- lapply(metafiles[2:length(metafiles)], function(x) {
   }
   return(metadata)
 })
+
+names(meta_files_data) <- nms
 ```
 
 The block of code above goes into all sub-directory in the **Cytometer Data**, read all *csv* files that are not associated with *GroupStats* (note that the csv files associated with the *instrument settings* and *GroupStats* are saved in each directory with an **_GroupStats** for the *GroupStats* csv files), clean untidy variable names and determine their *statu*s (*good* or *bad*). The *Status* and `File (file number)` are added as an extra column to the *csv* files. A *file number* $1$ implies the data associated to that sample is contained in the first *fcs* file while $2$ implies it is in the second. Below is what a sample of the metafiles look like after the preprocessing above.
 
 ```{r}
-head(meta_files_data[[1]])
+meta_files_data[[1]]
 
 ```
 
@@ -112,7 +119,7 @@ meta_files_data <- lapply(meta_files_data, function(y) {
   
   broken <- y %>% dplyr::group_by(Sample.ID2) %>% tidyr::nest()
   brokenR <- broken %>% dplyr::mutate(Retains = purrr::map(broken$data, function(.x) {
-      rt <- .x %>% dplyr::mutate(Retain = retain(.x, make_decision = "mini"))
+      rt <- .x %>% dplyr::mutate(Retain = retain(.x, make_decision = "maxi"))
       #cbind(.x, Retain = rt)
     })
   ) 
@@ -124,16 +131,16 @@ meta_files_data <- lapply(meta_files_data, function(y) {
 The code above groups the *csv* files by sample IDS then runs the *retain()* function on each group. This adds a `Retain` column to the original data table. This column gives a decision on the files to be retained. Below is an example of how the *csv* files look like after the pre-processing. 
 
 ```{r}
-head(meta_files_data[[1]])
+meta_files_data[[1]]
 ```
 
 
 ### Finally The Flow Cytometer Files
 
-We are finally ready to read in the flow cytometer files. We use the same idea as with the csv files. First, we filter out all rows that are to be retained in the associated csv files. Then we list all files with the **.fcs** externsion and read only the fcs files that are to be retained using both the File and Sample.Number columns. The File column allows us read the appropriate fcs file while the Sample.Number column allows us extract the precisely needed data from the fcs file.
+We are finally ready to read in the flow cytometer files. We use the same idea as with the csv files. First, we filter out all rows that are to be retained in the associated csv files. Then we list all files with the **.fcs** extension and read only the fcs files that are to be retained using both the *File* and *Sample.Number* columns. The *File* column allows us read the appropriate fcs file while the *Sample.Number* column allows us extract the precisely needed data from the fcs file.
 
 
-```{r readFcs, cache = TRUE}
+```{r readFcsfiles, cache = TRUE}
 fcs_files_data <- map2(.x = metafiles[2:length(metafiles)], .y = meta_files_data, 
       function(.x, .y) {
           Retained <- .y %>% dplyr::filter(Retain == "Retain")
@@ -149,12 +156,105 @@ fcs_files_data <- map2(.x = metafiles[2:length(metafiles)], .y = meta_files_data
                                         emptyValue = FALSE, 
                                         dataset = Retained$Sample.Number[i])
     })
-    keys <- sapply(fcs.files, keyword, "GTI$SAMPLEID")
-    names(fcs.files) <- keys
+    #keys <- sapply(fcs.files, keyword, "GTI$SAMPLEID")
+    names(fcs.files) <- Retained$Sample.ID2
     as(fcs.files, "flowSet")
   
 })
+
+names(fcs_files_data) <- nms
+pnames <- pData(phenoData(fcs_files_data$`02.04.2019`))
 ```
+
+
+### Filtering out Wrong Measurements and Transformation
+
+```{r filteringTrans}
+#getting the total number of particles counted by the flow cytometer
+Full_Particle_Count <- lapply(fcs_files_data, function(x) {
+  fsApply(x ,nrow)
+})
+
+#removing NAs in the expression matrix
+NonNas <- lapply(fcs_files_data, function (x) {
+  fsApply(x, function (y) {
+    nona(y)
+  })
+})
+
+### ArcSinh Transformation
+#arcsin_transformedSet <- lapply(NonNas, function(x) {
+#  fsApply(x, function(y, toTrans) {
+#    flowTrans(y, "mclMultivArcSinh", dims = toTrans, n2f = F, parameters.only = F)$result
+#  }, toTrans = c("RED.R.HLin", "FSC.HLin", "RED.B.HLin", "YEL.B.HLin"))
+#})
+
+#filtering out the positive values. This is only important if 
+#one plans to use log-transformation
+NonNegatives <- lapply(NonNas, function (x) {
+   fsApply(x, function (y) {
+     noneg(y)
+   })
+})
+
+### log Transformation
+log_transformedSet <- lapply(NonNegatives, function(x, ntt) {
+   fsApply(x, function (y, ntt2) {
+     lnTrans(y, notToTransform = ntt2)
+   },ntt2 = ntt)
+}, ntt = c("SSC.W", "TIME"))
+
+```
+
+```{r b4trans, fig.width=7, fig.height=6, fig.cap="Before Transformation"}
+pair_plot(NonNas$`02.04.2019`[[1]])
+```
+
+
+```{r aftertrans, fig.width=7, fig.height=6, fig.cap="After Transformation"}
+pair_plot(log_transformedSet$`02.04.2019`[[1]])
+```
+
+
+### Margin Events
+
+```{r margin, fig.height=3, fig.height=3,fig.cap='Gating Margin Events', results='hold'}
+logtrans_margin <- lapply(log_transformedSet, function(x) {
+  dlist <- fsApply(x, function(y, ch, typ){
+    cellmargin(y, Channel = ch, type = "estimate")$reducedflowframe
+  }, ch = "SSC.W")
+})
+
+```
+
+
+
+### Population Identification
+
+```{r popident}
+
+ lapply(logtrans_margin, function(x) { 
+    fsApply(x, function(y) {
+      if(str_detect(identifier(y), "B4") |  str_detect(identifier(y), "B5")) {
+        debris_nc(y, p1 = "RED.B.HLin", p2 = "YEL.B.HLin") 
+      } else {
+        debris_inc(y, p1 = "RED.B.HLin", p2 = "YEL.B.HLin") 
+      }
+      
+    })
+  
+})
+
+```
+
+
+### Density and Abundance Computation
+
+```{r densAbund}
+
+
+```
+
 
 
 
