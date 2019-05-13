@@ -21,7 +21,7 @@ source("../../cyanoFilter/R/nona.R")
 source("../../cyanoFilter/R/noneg.R")
 source("../../cyanoFilter/R/plotting_functions.R")
 #source("../../cyanoFilter/R/cell_debris.R")
-#source("../../cyanoFilter/R/cell_debris_nc.R")
+source("../../cyanoFilter/R/cell_gating.R")
 source("../../cyanoFilter/R/debris_nc.R")
 source("../../cyanoFilter/R/debris_c.R")
 source("../../cyanoFilter/R/bs4_nc.R")
@@ -115,15 +115,20 @@ meta_files_data[[1]]
 Since all samples were examined at different dilution levels, it implies that there is the possibility of having a sample being good at different dilution levels, therefore there is need for a choice to be made. We will discuss two strategies for making a choice of files to retain based on $cells/\mu L$. The first choice is going for the dilution factor with the lowest $cells/\mu L$ because this will ensure you have maximal number of events. This will be a good strategy for experiments with small number of particles. On the other hand, one could also decide to go for the dilution factor with the highest $cells/\mu L$.
 
 ```{r toretain}
-meta_files_data <- lapply(meta_files_data, function(y) {
+meta_files_data2 <- lapply(meta_files_data, function(y) {
   
   broken <- y %>% dplyr::group_by(Sample.ID2) %>% tidyr::nest()
-  brokenR <- broken %>% dplyr::mutate(Retains = purrr::map(broken$data, function(.x) {
-      rt <- .x %>% dplyr::mutate(Retain = retain(.x, make_decision = "maxi"))
-      #cbind(.x, Retain = rt)
+  broken <- broken %>% mutate(data2 = purrr::map(data, function(.x) {
+      .x %>% dplyr::mutate(Retain = retain(.x, make_decision = "maxi"))
+      
     })
-  ) 
-  return(tidyr::unnest(brokenR))
+  )
+
+  return(tidyr::unnest(broken, data2))
+})
+
+meta_files_dataR <- map(meta_files_data2, function(.y) {
+  Retained <- .y %>% dplyr::filter(Retain == "Retain")
 })
 
 ```
@@ -141,29 +146,29 @@ We are finally ready to read in the flow cytometer files. We use the same idea a
 
 
 ```{r readFcsfiles, cache = TRUE}
-fcs_files_data <- map2(.x = metafiles[2:length(metafiles)], .y = meta_files_data, 
+fcs_files_data <- map2(.x = metafiles[2:length(metafiles)], .y = meta_files_dataR, 
       function(.x, .y) {
-          Retained <- .y %>% dplyr::filter(Retain == "Retain")
+          #Retained <- .y %>% dplyr::filter(Retain == "Retain")
         
           inside <- list.files(.x, full.names = T)
           fcs.ext <- which(tools::file_ext(inside) == "fcs" )
           fcs.toberead <- inside[fcs.ext]
           
-          fcs.files <- lapply(1:nrow(Retained), function(i) {
-                          fcs_data <- read.FCS(fcs.toberead[Retained$File1[i]], 
+          fcs.files <- lapply(1:nrow(.y), function(i) {
+                          fcs_data <- read.FCS(fcs.toberead[.y$File[i]], 
                                           alter.names = TRUE, 
                                           transformation = FALSE, 
                                         emptyValue = FALSE, 
-                                        dataset = Retained$Sample.Number[i])
+                                        dataset = .y$Sample.Number[i])
     })
     #keys <- sapply(fcs.files, keyword, "GTI$SAMPLEID")
-    names(fcs.files) <- Retained$Sample.ID2
+    names(fcs.files) <- .y$Sample.ID2
     as(fcs.files, "flowSet")
   
 })
 
 names(fcs_files_data) <- nms
-pnames <- pData(phenoData(fcs_files_data$`02.04.2019`))
+#pnames <- pData(phenoData(fcs_files_data$`02.04.2019`))
 ```
 
 
@@ -206,6 +211,7 @@ log_transformedSet <- lapply(NonNegatives, function(x, ntt) {
 
 ```
 
+
 ```{r b4trans, fig.width=7, fig.height=6, fig.cap="Before Transformation"}
 pair_plot(NonNas$`02.04.2019`[[1]])
 ```
@@ -233,13 +239,41 @@ logtrans_margin <- lapply(log_transformedSet, function(x) {
 
 ```{r popident}
 
- lapply(logtrans_margin, function(x) { 
+ cellcounts <- lapply(logtrans_margin[- which(str_detect(names(logtrans_margin), "Prelim"))], function(x) { 
     fsApply(x, function(y) {
       if(str_detect(identifier(y), "B4") |  str_detect(identifier(y), "B5")) {
-        debris_nc(y, p1 = "RED.B.HLin", p2 = "YEL.B.HLin") 
+        
+        #db_rest <- debris_nc(y, p1 = "RED.B.HLin", p2 = "YEL.B.HLin") 
+        
+        if(str_detect(identifier(y), "B4") ) {
+          
+            results <- celldebris_nc(y, channel1 = "RED.B.HLin", channel2 = "YEL.B.HLin", interest = "BS4", to_retain = "refined")
+            cell_count <- results$Cell_count
+            #bs4_nc(db_rest$bs4bs5, p1 = "RED.B.HLin", p2 = "YEL.B.HLin", others = db_rest$bs4bs5_pos,
+            #       to_retain = "refined")
+            
+          
+        } else {
+          
+          results <- celldebris_nc(y, channel1 = "RED.B.HLin", channel2 = "YEL.B.HLin", interest = "BS5", to_retain = "refined")
+          cell_count <- results$Cell_count
+          #bs5_nc(db_rest$bs4bs5, p1 = "RED.B.HLin", p2 = "YEL.B.HLin", others = db_rest$bs4bs5_pos, 
+          #       to_retain = "refined")
+          
+        }
+        
       } else {
-        debris_inc(y, p1 = "RED.B.HLin", p2 = "YEL.B.HLin") 
+        
+        results <- celldebris_nc(y, channel1 = "RED.B.HLin", channel2 = "YEL.B.HLin", interest = "Both", to_retain = "refined")
+        cell_count <- results$Cell_count
+        #db_rest <- debris_inc(y, p1 = "RED.B.HLin", p2 = "YEL.B.HLin") 
+        #bs4_nc(db_rest$bs4bs5, p1 = "RED.B.HLin", p2 = "YEL.B.HLin", others = db_rest$bs4bs5_pos,
+        #           to_retain = "refined")
+        #bs5_nc(db_rest$bs4bs5, p1 = "RED.B.HLin", p2 = "YEL.B.HLin", others = db_rest$bs4bs5_pos, 
+        #         to_retain = "refined")
       }
+      
+      return(cell_count)
       
     })
   
@@ -251,7 +285,76 @@ logtrans_margin <- lapply(log_transformedSet, function(x) {
 ### Density and Abundance Computation
 
 ```{r densAbund}
+countdataF <- map(.x = nms[which(!str_detect(nms, "Prelim"))], function(.x) {
+  
+  touse <- meta_files_dataR[[.x]] %>% 
+    dplyr::select(Sample.ID2, Number.of.Events, Dilution.Factor, CellspML, `Total.Volume..µL.`, Strain = Strain)
+  countdata <- cbind(touse, 
+                     cellcounts[[.x]], 
+                     Date = rep(.x, nrow(touse)) 
+                     )
+  countdata$BS4[countdata$Strain == "5"] <- NA
+  countdata$BS5[countdata$Strain == "4"] <- NA
+  
+  #setting mistakes to NA 
+  countdata$BS4[countdata$Date == "26.03.2019" & countdata$Sample.ID2 == " BI_20_2"] <- NA
+  countdata$BS5[countdata$Date == "26.03.2019" & countdata$Sample.ID2 == " BI_20_2"] <- NA
+  
+  countdata$Density_BS4 <- (countdata$BS4 / countdata$`Total.Volume..µL.`) * countdata$Dilution.Factor
+  countdata$Density_BS5 <- (countdata$BS5 / countdata$`Total.Volume..µL.`) * countdata$Dilution.Factor
+  return(countdata)
+  
+}) %>% do.call(rbind.data.frame, .)
 
+### setting files omitted to NA
+countdataF <- rbind(countdataF, 
+                    data.frame(Sample.ID2 = " B5_22_1", Number.of.Events = NA, Dilution.Factor = NA, CellspML = NA, `Total.Volume..µL.` = NA, 
+                      Strain = "5", "BS4" = NA, BS5 = NA, Date = "02.04.2019", Density_BS4 = NA, Density_BS5 = NA) , 
+                    data.frame(Sample.ID2 = " B4_22_2", Number.of.Events = NA, Dilution.Factor = NA, CellspML = NA, `Total.Volume..µL.` = NA, 
+                      Strain = "4", BS4 = NA, BS5 = NA, Date = "26.03.2019", Density_BS4 = NA, Density_BS5 = NA) 
+                    )
+
+countdataF$Date2 <- as.Date(countdataF$Date, "%d.%m.%Y")
+countdataF <- countdataF[order(countdataF$Date2, countdataF$Sample.ID2),  ]
+countdataF$Time <- rep(cumsum(c(1, diff(unique(countdataF$Date2)))), each = 27)
+
+countdataF$Treatment <- sapply(str_split(countdataF$Sample.ID2,  "_"), "[[", 2)
+countdataF$Replicate <- sapply(str_split(countdataF$Sample.ID2,  "_"), "[[", 3)
+
+```
+
+
+### Plotting Growth Curves
+
+```{r}
+##BS4
+countdataF %>% dplyr::filter(Strain == "4") %>% ggplot(aes(x = Date2, group = Treatment, color = Treatment)) + 
+                                   geom_line(aes(x = Date2, y = log(Density_BS4)), linetype = "solid", size = 1.2) + 
+                                   facet_grid(Replicate ~ ., scales = "free_y") + 
+                                   geom_point(aes(x = Date2, y = log(Density_BS4)), size = 3, shape = 19) + ggtitle("BS4 Curves")
+
+##BS5
+countdataF %>% dplyr::filter(Strain == "5") %>% ggplot(aes(x = Date2, group = Treatment, color = Treatment)) + 
+                                   geom_line(aes(x = Date2, y = log(Density_BS5)), linetype = "dashed", size = 1.2) + 
+                                   facet_grid(Replicate ~ ., scales = "free_y") + 
+                                   geom_point(aes(x = Date2, y = log(Density_BS5)), size = 3, shape = 5) + ggtitle("BS5 Curves")
+
+##Biculture
+countdataF %>% dplyr::filter(Strain == "BI") %>% ggplot(aes(x = Date2, group = Treatment, color = Treatment)) + 
+                                   geom_line(aes(x = Date2, y = log(Density_BS5)), linetype = "dashed", size = 1.2) + 
+                                    geom_line(aes(x = Date2, y = log(Density_BS4)), linetype = "solid", size = 1.2) +
+                                   facet_grid(Replicate ~ ., scales = "free_y") + 
+                                   geom_point(aes(x = Date2, y = log(Density_BS4)), size = 3, shape = 19) + 
+                                   geom_point(aes(x = Date2, y = log(Density_BS5)), size = 3, shape = 5) + ggtitle("BS4 (Solid) BS5 (Dashed) Curves")
+
+```
+
+
+### Light Measurement
+
+```{r}
+  Light_Measurement %>% group_by(Experiment, Date) %>% summarise(ms = mean(Difference, na.rm = T)) %>%
+    ggplot(aes(x = Date, y = ms, group = Experiment, color = Experiment)) + geom_point() + geom_line()
 
 ```
 
