@@ -7,32 +7,27 @@ output:
 
 ```{r setup, include=FALSE}
 library(flowCore)
-#library(flowDensity)
+library(flowDensity)
 library(tidyverse)
 library(stringr)
+library(cyanoFilter)
 
 
 knitr::opts_chunk$set(echo = TRUE, message = F, warning = F)
 #source("Functions/distances.R")
-source("../../cyanoFilter/R/good_measurement.R")
-source("../../cyanoFilter/R/retain.R")
-source("../../cyanoFilter/R/lnTrans.R")
-source("../../cyanoFilter/R/nona.R")
-source("../../cyanoFilter/R/noneg.R")
-source("../../cyanoFilter/R/plotting_functions.R")
+#source("../../cyanoFilter/R/good_measurement.R")
+#source("../../cyanoFilter/R/retain.R")
+#source("../../cyanoFilter/R/lnTrans.R")
+#source("../../cyanoFilter/R/nona.R")
+#source("../../cyanoFilter/R/noneg.R")
+#source("../../cyanoFilter/R/plotting_functions.R")
 #source("../../cyanoFilter/R/cell_debris.R")
-source("../../cyanoFilter/R/cell_gating.R")
-source("../../cyanoFilter/R/debris_nc.R")
-source("../../cyanoFilter/R/debris_c.R")
-source("../../cyanoFilter/R/bs4_nc.R")
-source("../../cyanoFilter/R/bs4_c.R")
-source("../../cyanoFilter/R/debris_invasion_nc.R")
-source("../../cyanoFilter/R/bs4_invasion_c.R")
-source("../../cyanoFilter/R/bs5_c.R")
-source("../../cyanoFilter/R/bs5_nc.R")
-source("../../cyanoFilter/R/bs5_invasion_c.R")
-source("../../cyanoFilter/R/bs5_invasion_nc.R")
-source("../../cyanoFilter/R/Margin_Cells.R")
+#source("../../cyanoFilter/R/cell_gating.R")
+#source("../../cyanoFilter/R/debris_nc.R")
+#source("../../cyanoFilter/R/bs4_nc.R")
+#source("../../cyanoFilter/R/debris_invasion_nc.R")
+#source("../../cyanoFilter/R/bs5_nc.R")
+#source("../../cyanoFilter/R/Margin_Cells.R")
 ```
 
 
@@ -42,7 +37,7 @@ The flow cytometer files are stored the **Cytometer Data** directory one level a
 
 ### What Measurements are Good?
 
-To determine if a measurement from the flow cytometer is good, the cells per microlitre $(cells/\mu L)$ should be between $50$ and $1000$. The dilution factor that will result $cells/\mu L$ within this range is normally not known in advance, hence the flow cytometry experiment is performed at different diltuion factors ($2 - 3$ dilution factors). Furthermore, the flow cytometer is configured to count at least $5000$ gated events, it is also desired to ignore files that doesn't meet this threshold. Technically if the $cells/\mu L$ is below $50$, the number of gated events will be lesser than $5000$ but the same cannot be said of files with $cells/\mu L$ above $1000$. The above discussed concepts are already implemented in the *goodfcs()* function from the **cyanoFilter** package. Hence, we use this to determine which of the dilution levels are good.
+To determine if a measurement from the flow cytometer is good, the cells per microlitre $(cells/\mu L)$ should be between $50$ and $1000$. The dilution factor that will result $cells/\mu L$ within this range is normally not known in advance, hence the flow cytometry experiment is performed at different diltuion factors ($2 - 3$ dilution factors). Furthermore, the flow cytometer is configured to count at least $5000$ gated events, it is also desired to ignore files that doesn't meet this threshold. Technically if the $cells/\mu L$ is below $50$, the number of gated events will be lesser than $5000$ but the same cannot be said of files with $cells/\mu L$ above $1000$. The above discussed concepts are already implemented in the *goodfcs()* function from the **cyanoFilter** package. Hence, we use this to determine which of the dilution level(s) is(are) good.
 
 ```{r readcsvfiles}
 #list all folders in the Cytometer Data folder
@@ -107,7 +102,6 @@ The block of code above goes into all sub-directory in the **Cytometer Data**, r
 
 ```{r}
 meta_files_data[[1]]
-
 ```
 
 ### Files Retained
@@ -136,7 +130,7 @@ meta_files_dataR <- map(meta_files_data2, function(.y) {
 The code above groups the *csv* files by sample IDS then runs the *retain()* function on each group. This adds a `Retain` column to the original data table. This column gives a decision on the files to be retained. Below is an example of how the *csv* files look like after the pre-processing. 
 
 ```{r}
-meta_files_data[[1]]
+meta_files_dataR[[1]]
 ```
 
 
@@ -226,20 +220,60 @@ pair_plot(log_transformedSet$`02.04.2019`[[1]])
 
 ```{r margin, fig.height=3, fig.height=3,fig.cap='Gating Margin Events', results='hold'}
 logtrans_margin <- lapply(log_transformedSet, function(x) {
-  dlist <- fsApply(x, function(y, ch, typ){
-    cellmargin(y, Channel = ch, type = "estimate")$reducedflowframe
+  dlist <- fsApply(x, function(y, ch){
+    cellmargin(y, Channel = ch, type = "estimate", y_toplot = "FSC.HLin")
   }, ch = "SSC.W")
 })
 
-```
+### extracting the reduced flow frame
+logtrans_margin_reducedframe <- lapply(logtrans_margin, function(x) {
+   
+  margins <- lapply(x, function(y) {
+     
+     y[["reducedflowframe"]]
+     
+   })
+  return(as(margins, "flowSet"))
+   
+ })
 
+
+### extracting the number of margin events gated, i.e. N_margin
+N_margin <- lapply(logtrans_margin, function(x) {
+   
+   ddata <- lapply(x, function(y) {
+     
+     y[["N_margin"]]
+     
+   })
+   
+   return(data.frame(Sample.ID2 = str_trim(names(ddata), side = "both"), N_margin = unlist(ddata), stringsAsFactors = F))
+   
+ })
+
+### extracting the number of particles before removing margin events, i.e. N_particle which is fullparticle - (nona + noneg)
+N_particle <- lapply(logtrans_margin, function(x) {
+   
+   ddata <- lapply(x, function(y) {
+     
+     y[["N_particle"]]
+     
+   })
+   
+   return(data.frame(Sample.ID2 = str_trim(names(ddata), side = "both"), N_particle_r = unlist(ddata), stringsAsFactors = F))
+   
+ })
+
+
+
+```
 
 
 ### Population Identification
 
 ```{r popident}
 
- cellcounts <- lapply(logtrans_margin[- which(str_detect(names(logtrans_margin), "Prelim"))], function(x) { 
+cells <- lapply(logtrans_margin_reducedframe[- which(str_detect(names(logtrans_margin_reducedframe), "Prelim"))], function(x) { 
     fsApply(x, function(y) {
       if(str_detect(identifier(y), "B4") |  str_detect(identifier(y), "B5")) {
         
@@ -248,35 +282,66 @@ logtrans_margin <- lapply(log_transformedSet, function(x) {
         if(str_detect(identifier(y), "B4") ) {
           
             results <- celldebris_nc(y, channel1 = "RED.B.HLin", channel2 = "YEL.B.HLin", interest = "BS4", to_retain = "refined")
-            cell_count <- results$Cell_count
-            #bs4_nc(db_rest$bs4bs5, p1 = "RED.B.HLin", p2 = "YEL.B.HLin", others = db_rest$bs4bs5_pos,
-            #       to_retain = "refined")
-            
-          
+
         } else {
           
           results <- celldebris_nc(y, channel1 = "RED.B.HLin", channel2 = "YEL.B.HLin", interest = "BS5", to_retain = "refined")
-          cell_count <- results$Cell_count
-          #bs5_nc(db_rest$bs4bs5, p1 = "RED.B.HLin", p2 = "YEL.B.HLin", others = db_rest$bs4bs5_pos, 
-          #       to_retain = "refined")
           
         }
         
       } else {
         
         results <- celldebris_nc(y, channel1 = "RED.B.HLin", channel2 = "YEL.B.HLin", interest = "Both", to_retain = "refined")
-        cell_count <- results$Cell_count
-        #db_rest <- debris_inc(y, p1 = "RED.B.HLin", p2 = "YEL.B.HLin") 
-        #bs4_nc(db_rest$bs4bs5, p1 = "RED.B.HLin", p2 = "YEL.B.HLin", others = db_rest$bs4bs5_pos,
-        #           to_retain = "refined")
-        #bs5_nc(db_rest$bs4bs5, p1 = "RED.B.HLin", p2 = "YEL.B.HLin", others = db_rest$bs4bs5_pos, 
-        #         to_retain = "refined")
+        
       }
-      
-      return(cell_count)
       
     })
   
+})
+
+### filtering out the reduced frames
+logtrans_bs4bs5_reducedframe <- lapply(cells, function(x) {
+   
+  rframes <- lapply(x, function(y){
+     
+     y[["reducedframe"]]
+     
+   })
+  return(as(rframes, "flowSet"))
+   
+})
+
+###   cell counts
+cellcounts <- lapply(cells, function(x) {
+   
+  rframes <- lapply(x, function(y) {
+     
+     y[["Cell_count"]]
+     
+   })
+  
+  fnms <- names(unlist(rframes))
+  fnms <- str_trim(fnms, side = "both")
+  Spps <- NULL
+  Spps <- ifelse(str_length(fnms) <= 7, substr(fnms, 1, 2), substr(fnms, 9, 11))
+  Spps <- gsub("S", "", Spps)
+  
+  return(data.frame(Sample.ID2 = substr(fnms, 1, 7), Strain = Spps, Count = unlist(rframes), stringsAsFactors = F) )
+   
+})
+
+###   Debris Count
+debriscounts <- lapply(cells, function(x) {
+   
+  rframes <- lapply(x, function(y) {
+     
+     y[["Debris_Count"]]
+     
+   })
+  fnms <- names(unlist(rframes))
+  fnms <- str_trim(fnms, side = "both")
+  return(data.frame(Sample.ID2 = fnms, Debris_Count = unlist(rframes), stringsAsFactors = F) )
+   
 })
 
 ```
@@ -288,28 +353,33 @@ logtrans_margin <- lapply(log_transformedSet, function(x) {
 countdataF <- map(.x = nms[which(!str_detect(nms, "Prelim"))], function(.x) {
   
   touse <- meta_files_dataR[[.x]] %>% 
-    dplyr::select(Sample.ID2, Number.of.Events, Dilution.Factor, CellspML, `Total.Volume..µL.`, Strain = Strain)
-  countdata <- cbind(touse, 
-                     cellcounts[[.x]], 
-                     Date = rep(.x, nrow(touse)) 
-                     )
-  countdata$BS4[countdata$Strain == "5"] <- NA
-  countdata$BS5[countdata$Strain == "4"] <- NA
+    dplyr::select(Sample.ID2, Number.of.Events, Dilution.Factor, CellspML, `Total.Volume..µL.`)
+  touse$Sample.ID2 <- str_trim(touse$Sample.ID2, side = "both")
+  #merge debris and cell counts
+  m1 <- merge(debriscounts[[.x]], cellcounts[[.x]], by = "Sample.ID2")
+  #merge the margins
+  m2 <- merge(N_margin[[.x]], N_particle[[.x]], by = "Sample.ID2")
+  #merge the two above
+  m_data_merge <- merge(m1, m2, by = "Sample.ID2")
+  #convert sample.id
+  m_data_merge$Sample.ID2 <- str_trim(as.character(m_data_merge$Sample.ID2), side = "both")
+  countdata <- merge(touse, m_data_merge, by = "Sample.ID2")
+  #
+  countdata$Sample.ID2 <- str_trim(as.character(countdata$Sample.ID2), side = "both")
+  countdata$Date <- rep(.x, nrow(countdata))
   
   #setting mistakes to NA 
-  countdata$BS4[countdata$Date == "26.03.2019" & countdata$Sample.ID2 == " BI_20_2"] <- NA
-  countdata$BS5[countdata$Date == "26.03.2019" & countdata$Sample.ID2 == " BI_20_2"] <- NA
+  countdata$Count[countdata$Date == "26.03.2019" & countdata$Sample.ID2 == "BI_20_2"] <- NA
+  countdata$Density <- (countdata$Count / countdata$`Total.Volume..µL.`) * countdata$Dilution.Factor
   
-  countdata$Density_BS4 <- (countdata$BS4 / countdata$`Total.Volume..µL.`) * countdata$Dilution.Factor
-  countdata$Density_BS5 <- (countdata$BS5 / countdata$`Total.Volume..µL.`) * countdata$Dilution.Factor
   return(countdata)
   
 }) %>% do.call(rbind.data.frame, .)
 
 ### setting files omitted to NA
 countdataF <- rbind(countdataF, 
-                    data.frame(Sample.ID2 = " B5_22_1", Number.of.Events = NA, Dilution.Factor = NA, CellspML = NA, `Total.Volume..µL.` = NA, 
-                      Strain = "5", "BS4" = NA, BS5 = NA, Date = "02.04.2019", Density_BS4 = NA, Density_BS5 = NA) , 
+                    data.frame(Sample.ID2 = "B5_22_1", Number.of.Events = NA, Dilution.Factor = NA, CellspML = NA, `Total.Volume..µL.` = NA, Debris_Count = NA, 
+                      Strain = "B5", "BS4" = NA, BS5 = NA, Date = "02.04.2019", Density_BS4 = NA, Density_BS5 = NA) , 
                     data.frame(Sample.ID2 = " B4_22_2", Number.of.Events = NA, Dilution.Factor = NA, CellspML = NA, `Total.Volume..µL.` = NA, 
                       Strain = "4", BS4 = NA, BS5 = NA, Date = "26.03.2019", Density_BS4 = NA, Density_BS5 = NA) 
                     )
